@@ -8,5 +8,5 @@ from .__about__ import (
     __url__,
     __packagename__,
     __description__,
-    __longdesc__
+    __longdesc__,
 )
