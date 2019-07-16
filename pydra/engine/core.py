@@ -98,6 +98,7 @@ class TaskBase:
         self.state = None
         self._output = {}
         self._result = {}
+        self._manual = False
         # flag that says if node finished all jobs
         self._done = False
         if self._input_sets is None:
@@ -273,7 +274,11 @@ class TaskBase:
             result = Result(output=None, runtime=None, errored=False)
             try:
                 self.audit.monitor()
-                self._run_task()
+                if not self._manual:
+                    self._run_task()
+                else:
+                    # manual intervention
+                    breakpoint()
                 result.output = self._collect_outputs()
             except Exception as e:
                 record_error(self.output_dir, e)
