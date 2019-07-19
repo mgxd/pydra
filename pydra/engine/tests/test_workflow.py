@@ -1498,3 +1498,11 @@ def test_wf_ndstate_cachelocations_recompute(plugin, tmpdir):
     # checking if the second wf didn't run again
     # checking all directories
     assert wf2.output_dir.exists()
+
+
+def test_cache_propagation(tmpdir):
+    wf = Workflow(name="wf", input_spec=["x"])
+    n1 = multiply(name="mult1", y=1)
+    n2 = multiply(name="mult2", y=2)
+
+    breakpoint()
