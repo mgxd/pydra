@@ -25,6 +25,7 @@ from .helpers import (
     save_result,
     ensure_list,
     record_error,
+    hash_function,
 )
 from .graph import DiGraph
 from .audit import Audit
@@ -163,14 +164,17 @@ class TaskBase:
 
     @property
     def checksum(self):
-        """calculating checksum if self._checksum is None only
-            (avoiding recomputing during the execution)
+        """calculating checksum
         """
-        if self._checksum is None:
-            if self.state is None:
-                self._checksum = create_checksum(self.__class__.__name__, self.inputs)
-            else:
-                return {sidx: res[1] for (sidx, res) in self.results_dict.items()}
+        input_hash = self.inputs.hash
+        if self.state is None:
+            self._checksum = create_checksum(self.__class__.__name__, input_hash)
+        else:
+            # including splitter in the hash
+            splitter_hash = hash_function(self.state.splitter)
+            self._checksum = create_checksum(
+                self.__class__.__name__, hash_function([input_hash, splitter_hash])
+            )
         return self._checksum
 
     def set_state(self, splitter, combiner=None):
@@ -223,10 +227,14 @@ class TaskBase:
     @property
     def output_dir(self):
         if self.state:
-            return {
-                sidx: self._cache_dir / checksum
-                for (sidx, checksum) in self.checksum.items()
-            }
+            if self.results_dict:
+                return [
+                    self._cache_dir / res[1] for (_, res) in self.results_dict.items()
+                ]
+            else:
+                raise Exception(
+                    f"output_dir not available, will be ready after running {self.name}"
+                )
         else:
             return self._cache_dir / self.checksum
 
@@ -467,7 +475,6 @@ class Workflow(TaskBase):
 
         # store output connections
         self._connections = None
-        self.node_names = []
 
     def __getattr__(self, name):
         if name == "lzin":
@@ -498,22 +505,37 @@ class Workflow(TaskBase):
         return self.graph.sorted_nodes
 
     def add(self, task):
+        """adding a task to the workflow"""
         if not is_task(task):
             raise ValueError("Unknown workflow element: {!r}".format(task))
         self.graph.add_nodes(task)
         self.name2obj[task.name] = task
         self._last_added = task
+        self.create_connections(task)
+        logger.debug(f"Added {task}")
+        self.inputs._graph = deepcopy(self.graph_sorted)
+        return self
+
+    def create_connections(self, task):
+        """creating connections between tasks"""
         other_states = {}
         for field in dc.fields(task.inputs):
             val = getattr(task.inputs, field.name)
             if isinstance(val, LazyField):
                 # adding an edge to the graph if task id expecting output from a different task
                 if val.name != self.name:
+                    # checking if the connection is already in the graph
+                    if (getattr(self, val.name), task) in self.graph.edges:
+                        continue
                     self.graph.add_edges((getattr(self, val.name), task))
                     logger.debug("Connecting %s to %s", val.name, task.name)
-                if val.name in self.node_names and getattr(self, val.name).state:
-                    # adding a state from the previous task to other_states
-                    other_states[val.name] = (getattr(self, val.name).state, field.name)
+
+                    if getattr(self, val.name).state:
+                        # adding a state from the previous task to other_states
+                        other_states[val.name] = (
+                            getattr(self, val.name).state,
+                            field.name,
+                        )
         # if task has connections state has to be recalculated
         if other_states:
             if hasattr(task, "fut_combiner"):
@@ -522,10 +544,6 @@ class Workflow(TaskBase):
                 )
             else:
                 task.state = state.State(task.name, other_states=other_states)
-        self.node_names.append(task.name)
-        logger.debug(f"Added {task}")
-        self.inputs._graph = self.graph_sorted
-        return self
 
     async def _run(self, submitter=None, **kwargs):
         self.inputs = dc.replace(self.inputs, **kwargs)
@@ -535,7 +553,9 @@ class Workflow(TaskBase):
         result = self.result()
         if result is not None:
             return result
-
+        # creating connections that were defined after adding tasks to the wf
+        for task in self.graph.nodes:
+            self.create_connections(task)
         """
         Concurrent execution scenarios
 

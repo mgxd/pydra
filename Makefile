@@ -16,7 +16,7 @@ clean-build:
 clean: clean-pyc clean-build
 
 format:
-	yapf --parallel --in-place --recursive --exclude 'pydra/_version.py' pydra
+	black pydra setup.py
 
 lint:
 	flake8
