@@ -96,10 +96,10 @@ class TaskBase:
             for field in dc.fields(klass)
             if field.name not in ["_func", "_graph"]
         ]
+        self.manual = False
         self.state = None
         self._output = {}
         self._result = {}
-        self._manual = False
         # flag that says if node finished all jobs
         self._done = False
         if self._input_sets is None:
@@ -282,11 +282,11 @@ class TaskBase:
             result = Result(output=None, runtime=None, errored=False)
             try:
                 self.audit.monitor()
-                if not self._manual:
+                if not self.manual:
                     self._run_task()
                 else:
-                    # manual intervention
-                    breakpoint()
+                    # stall until external response
+                    pass
                 result.output = self._collect_outputs()
             except Exception as e:
                 record_error(self.output_dir, e)
